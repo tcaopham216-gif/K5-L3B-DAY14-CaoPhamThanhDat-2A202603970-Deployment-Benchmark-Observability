@@ -32,7 +32,9 @@ flowchart LR
 
 Compose khởi động Redis và Qdrant, chờ hai health check đạt, sau đó chạy agent và Nginx. Nginx là điểm vào của client. Hai URL nội bộ được truyền sẵn cho agent mẫu để cấu hình Redis và Qdrant. Endpoint `/ask` trong mẫu gọi mock trực tiếp.
 
-Đợt chạy Compose và build image mẫu dừng do ổ dữ liệu Docker báo `read-only file system`. Chưa có số dung lượng cặp image develop/production hoặc HTTP qua Nginx để báo cáo.
+`docker images my-agent` hiển thị `develop` 1.67GB và `advanced` 240MB. Đối chiếu số byte bằng `docker image inspect`, image production nhỏ hơn **85.6%**. Container develop trả `HTTP/1.1 200 OK` và một câu trả lời mẫu khi gửi `POST /ask?question=What%20is%20Docker%3F`.
+
+Qua Nginx ở `127.0.0.1:18080`, `GET /health` và `POST /ask` với JSON hợp lệ đều trả `HTTP/1.1 200 OK`. Cổng này thay cho cổng 80 đang bị Windows giữ.
 
 ## Part 3 — Cloud Deployment
 
@@ -90,17 +92,17 @@ retry-after: 59
 
 Bản develop chạy trên localhost trả 200 cho `/health` và `/ready`.
 
-Test ba replica của Exercise 5.4–5.5 chưa chạy xong vì Docker không ghi được ổ dữ liệu.
+Chạy `test_stateless.py` qua Nginx với ba replica. 5 request trong cùng session được xử lý trên 3 container. Khi đọc lại, Redis còn đủ **10 tin nhắn** gồm cả câu hỏi lẫn câu trả lời. Điều này xác nhận các replica chia sẻ cùng lịch sử session.
 
 ## Part 6 — Production-ready agent
 
 Agent dùng một sliding window 60 giây theo API key. Redis thực thi cả bước kiểm tra và cập nhật bằng một thao tác nguyên tử, nhờ đó hai worker không thể cùng nhận slot cuối. Key trong Redis chứa hàm băm của API key. Ngân sách dùng chung theo ngày UTC và chi phí được tính xấp xỉ từ số ký tự. Guard kiểm tra tổng đã ghi trước khi gọi mock, nên các request đang xử lý đồng thời có thể làm tổng vượt ngưỡng trước khi lần kiểm tra tiếp theo chặn request. `/ready` thử ping Redis và trả 503 nếu Redis lỗi. `/health` tiếp tục trả 200. Uvicorn xử lý SIGTERM, chờ request rồi gọi lifespan để đóng pool của worker.
 
-Chạy nguyên script chấm trong Linux với Redis thật. Image build xong và được script đo **238 MB**. Runtime dùng hai worker, lần thử SIGTERM trả HTTP 200 và process thoát mã 0. Hai mục Docker bị ảnh hưởng khi Docker Engine báo `read-only file system` ở bước tạo container kiểm thử.
+Chạy lại script chấm đầy đủ trong Linux với Redis thật sau khi chuyển dữ liệu Docker sang ổ E. Image được đo **238 MB**. Bài SIGTERM vẫn trả HTTP 200 cho request đang xử lý và tiến trình thoát mã 0. `docker stop` dừng container trong 1,1 giây, mã thoát 0.
 
 ```text
   📋 Checklist Deliverable
-     ❌ Dockerfile (multi-stage, < 500 MB)
+     ✅ Dockerfile (multi-stage, < 500 MB)
      ✅ docker-compose.yml (agent + redis)
      ✅ .dockerignore
      ✅ Health check endpoint (GET /health)
@@ -110,10 +112,11 @@ Chạy nguyên script chấm trong Linux với Redis thật. Image build xong v�
      ✅ Cost guard
      ✅ Config từ environment variables
      ✅ Structured logging
-     ❌ Graceful shutdown
+     ✅ Graceful shutdown
      ✅ Public URL ready (Railway / Render config)
 ----------------------------------------------------------------
-  Result: 10/12 tiêu chí đạt · 42/44 checks passed
+  Result: 12/12 tiêu chí đạt · 43/43 checks passed
+  🎉 PASS 12/12 — PRODUCTION READY! Deploy nào!
 ```
 
 ## AI log

@@ -1,8 +1,10 @@
 # Benchmark & Observability Report — Day 14
 
 **Họ tên** Cao Phạm Thành Đạt — 2A202603970
+
 **Ngày chạy** 26/11/2026 (GMT+7)
-**Môi trường** Windows, Python 3.14 cho local benchmark, Docker Desktop Linux cho observability. Agent dùng mock LLM.
+
+**Môi trường** Windows, Python 3.14 cho local benchmark, Docker Desktop Linux cho observability. Agent dùng mock LLM. Trong lượt chạy Docker, Nginx nhận request từ ứng dụng kiểm thử qua localhost, còn Locust đi qua Nginx trong mạng Compose. Dockerfile của agent observability đặt home của user `agent` tại `/home/agent` để Python nạp được thư viện ở `.local`.
 
 ## 1. SLO và quality gate
 
@@ -69,30 +71,49 @@ Trong lần eval sau sửa, `http_requests_total{method="POST",route="/ask",stat
 
 ### 4.1 Grafana và metrics
 
-Chưa có mẫu truy vấn Prometheus trong lần thu dữ liệu. Nginx cấu hình trả 404 cho `/metrics` và Prometheus scrape trực tiếp các agent. Input token gồm system prompt, tài liệu truy xuất và câu hỏi nên thường nhiều hơn output token.
+Sau lượt scale 3, Prometheus đo p95 là 293.8 ms và trung bình là 232.4 ms trong cửa sổ 1 phút. Khoảng cách này phản ánh các request ở đuôi phân phối có độ trễ cao hơn. Nginx chia tải gần đều qua ba replica, lần lượt 20.65, 20.64 và 20.42 request/s. Tốc độ xử lý là 4759.5 token đầu vào/s và 2501.7 token đầu ra/s. Prompt gồm system message, câu hỏi và tài liệu truy xuất nên thường dài hơn câu trả lời. Nginx trả HTTP 404 cho `/metrics`. Prometheus scrape trực tiếp từng agent trong mạng Compose.
 
+- [grafana-dashboard.png](screenshots/grafana-dashboard.png)
+- [jaeger-slow-trace.png](screenshots/jaeger-slow-trace.png)
+- [jaeger-error-trace.png](screenshots/jaeger-error-trace.png)
+- [prometheus-alert-firing.png](screenshots/prometheus-alert-firing.png)
 
 ### 4.2 Fault injection
 
+Lệnh `promtool test rules /p/alert_rules_test.yml` báo `SUCCESS`.
+
 | # | Cấu hình | Alert | Thời gian đến firing |
 | --- | --- | --- | --- |
-| A | `MOCK_ERROR_RATE=0.2` (cùng B) | Chưa thu bằng chứng | Chưa đo |
-| B | `MOCK_SLOW_RATE=0.3` (cùng A) | Chưa thu bằng chứng | Chưa đo |
+| A | `MOCK_ERROR_RATE=0.2` (cùng B) | `AgentHighErrorRate` | 99.8 s |
+| B | `MOCK_SLOW_RATE=0.3` (cùng A) | `AgentHighLatencyP95` | 163.2 s |
 
-Panel phản ánh A là Error Rate và panel phản ánh B là Latency p95. Timing được tính từ lúc bắt đầu cập nhật Compose đến lần poll đầu tiên thấy `firing`. C (model lớn), D (pause instance) và E (hạ phiên bản) là các kịch bản bổ sung. Để phát hiện kiểu giảm chất lượng E, có thể chạy eval trên canary và theo dõi tỷ lệ câu đạt trên một tập câu hỏi kiểm soát. Health, latency và error rate có thể vẫn trong ngưỡng khi câu trả lời sai.
+Panel phản ánh A là Error Rate và panel phản ánh B là Latency p95. Thời gian được tính từ lúc bắt đầu cập nhật Compose đến lần đọc đầu tiên thấy `firing`. Cảnh báo chi phí trong ảnh đã kích hoạt khi chạy tải và không thuộc hai phép đo A, B. Với kịch bản E (hạ phiên bản), có thể phát hiện suy giảm chất lượng bằng eval trên canary và theo dõi tỷ lệ câu đạt trên bộ câu hỏi kiểm soát. Health, latency và error rate có thể vẫn trong ngưỡng khi câu trả lời sai.
 
 ### 4.3 Traces và log
 
-Chưa có mẫu Jaeger khớp với log JSON trong đợt thu bằng chứng.
+**Trace chậm** `fd8680633246716e7fadfcea9cde01b5`, tổng thời gian 1711.566 ms. Span xử lý LLM `chat mock-llm-small` chiếm 1693.236 ms (98.9%).
+
+```json
+{"ts": "2026-11-26T09:08:09.157850+00:00", "level": "INFO", "service": "observable-agent", "instance": "d2e0e7969fe9", "event": "llm_call", "trace_id": "fd8680633246716e7fadfcea9cde01b5", "span_id": "b75fa1a012ee7754", "request_id": "174baf4b8651", "model": "mock-llm-small", "agent_version": "v2", "input_tokens": 66, "output_tokens": 38, "cost_usd": 3.3e-05, "llm_ms": 1693.1}
+```
+
+**Trace lỗi** `8cb06a41f7ab1229c69641b433d3de95` được thu trong lần tái hiện cùng cấu hình mô phỏng lỗi. Tổng thời gian là 574.970 ms. Span `chat mock-llm-small` chiếm 109.289 ms (19.0%) và ghi event `exception` với lỗi upstream 503.
+
+```json
+{"ts": "2026-11-26T12:47:37.906606+00:00", "level": "INFO", "service": "observable-agent", "instance": "337b4b7669e0", "event": "llm_error", "trace_id": "8cb06a41f7ab1229c69641b433d3de95", "span_id": "c53575ea920f4854", "request_id": "fce2ca6680b6", "error": "Upstream LLM error: 503 Service Unavailable (mock)"}
+```
+
 
 ## 5. Scaling
 
-Locust headless chạy 100 user, spawn rate 10 user/s, thời lượng 2 phút mỗi cấu hình. Bảng lấy hàng `Aggregated` trong CSV.
+Locust headless chạy 100 user, spawn rate 10 user/s, thời lượng 2 phút mỗi cấu hình. Bảng lấy hàng `Aggregated` trong CSV. Dùng `docker compose run --no-deps` để giữ số replica đã đặt bằng `--scale`. Xác nhận các target Prometheus đều up trước và sau mỗi lượt.
 
 | Số instance | RPS | p50 (ms) | p95 (ms) | p99 (ms) | Failures |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | Chưa đo | — | — | — | — |
-| 3 | Chưa đo | — | — | — | — |
+| 1 | 65.49 | 190 | 320 | 1700 | 72 |
+| 3 | 65.96 | 190 | 250 | 1700 | 61 |
+
+p95 giảm 70 ms khi tăng từ 1 lên 3 replica, còn thông lượng chỉ tăng 0.47 request/s và p99 giữ ở 1700 ms. Với 100 user cố định có thời gian chờ giữa các request, tải đã nằm trong khả năng của một replica. Độ trễ nhân tạo của mock LLM vẫn chi phối p99, còn phân phối lỗi và request chậm trong từng lượt có thể ảnh hưởng đến p95. Cần lặp lại benchmark để ước lượng độ ổn định của chênh lệch p95.
 
 ## 6. Kết luận
 
