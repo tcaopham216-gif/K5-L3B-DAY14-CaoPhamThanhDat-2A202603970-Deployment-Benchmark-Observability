@@ -1,7 +1,9 @@
 # Lab 14 — Deployment
 
-**Nền tảng chọn:** Render
-**Trạng thái:** Đã chuẩn bị Blueprint và Dockerfile. Chưa provision dịch vụ cloud, nên chưa có URL public hoặc ảnh dashboard deploy.
+- **Nền tảng** Render Free
+- **URL public** [lab14-agent-vn6b.onrender.com](https://lab14-agent-vn6b.onrender.com/health)
+- **Trạng thái** Đã deploy và kiểm tra public ngày 26/11/2026 (GMT+7).
+- **Bằng chứng** [Render web service](https://dashboard.render.com/web/srv-dc3u83ei0phs738jd690) · [Blueprint sync](https://dashboard.render.com/blueprint/exs-dc3u7rmi0phs738jc9rg/sync/exe-dc3u7sei0phs738jccig)
 
 ## Blueprint
 
@@ -30,4 +32,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/ask" \
   -d '{"question":"Hello"}'
 ```
 
-Kỳ vọng lần lượt 200, 200, 401, 200. Ba ảnh cần bổ sung sau khi lên cloud là `screenshots/dashboard.png`, `screenshots/running.png` và `screenshots/test.png`.
+| Kiểm tra qua URL public | HTTP quan sát được |
+| --- | ---: |
+| `GET /health` | 200 |
+| `GET /ready` | 200 |
+| `POST /ask` với body hợp lệ, thiếu key | 401 |
+| `POST /ask` với body hợp lệ, đúng key | 200 |
+
+[Ảnh endpoint /health](screenshots/running.png) · [Kết quả bốn phép kiểm HTTP](screenshots/test.png)
