@@ -32,7 +32,7 @@ flowchart LR
 
 Compose khởi động Redis và Qdrant, chờ hai health check đạt, sau đó chạy agent và Nginx. Nginx là điểm vào của client. Hai URL nội bộ được truyền sẵn cho agent mẫu để cấu hình Redis và Qdrant. Endpoint `/ask` trong mẫu gọi mock trực tiếp.
 
-<!-- part2-evidence -->
+Đợt chạy Compose và build image mẫu dừng do ổ dữ liệu Docker báo `read-only file system`. Chưa có số dung lượng cặp image develop/production hoặc HTTP qua Nginx để báo cáo.
 
 ## Part 3 — Cloud Deployment
 
@@ -90,13 +90,31 @@ retry-after: 59
 
 Bản develop chạy trên localhost trả 200 cho `/health` và `/ready`.
 
-<!-- scaling-evidence -->
+Test ba replica của Exercise 5.4–5.5 chưa chạy xong vì Docker không ghi được ổ dữ liệu.
 
 ## Part 6 — Production-ready agent
 
 Agent dùng một sliding window 60 giây theo API key. Redis thực thi cả bước kiểm tra và cập nhật bằng một thao tác nguyên tử, nhờ đó hai worker không thể cùng nhận slot cuối. Key trong Redis chứa hàm băm của API key. Ngân sách dùng chung theo ngày UTC và chi phí được tính xấp xỉ từ số ký tự. Guard kiểm tra tổng đã ghi trước khi gọi mock, nên các request đang xử lý đồng thời có thể làm tổng vượt ngưỡng trước khi lần kiểm tra tiếp theo chặn request. `/ready` thử ping Redis và trả 503 nếu Redis lỗi. `/health` tiếp tục trả 200. Uvicorn xử lý SIGTERM, chờ request rồi gọi lifespan để đóng pool của worker.
 
-<!-- grader-evidence -->
+Chạy nguyên script chấm trong Linux với Redis thật. Image build xong và được script đo **238 MB**. Runtime dùng hai worker, lần thử SIGTERM trả HTTP 200 và process thoát mã 0. Hai mục Docker bị ảnh hưởng khi Docker Engine báo `read-only file system` ở bước tạo container kiểm thử.
+
+```text
+  📋 Checklist Deliverable
+     ❌ Dockerfile (multi-stage, < 500 MB)
+     ✅ docker-compose.yml (agent + redis)
+     ✅ .dockerignore
+     ✅ Health check endpoint (GET /health)
+     ✅ Readiness endpoint (GET /ready)
+     ✅ API Key authentication
+     ✅ Rate limiting
+     ✅ Cost guard
+     ✅ Config từ environment variables
+     ✅ Structured logging
+     ❌ Graceful shutdown
+     ✅ Public URL ready (Railway / Render config)
+----------------------------------------------------------------
+  Result: 10/12 tiêu chí đạt · 42/44 checks passed
+```
 
 ## AI log
 
