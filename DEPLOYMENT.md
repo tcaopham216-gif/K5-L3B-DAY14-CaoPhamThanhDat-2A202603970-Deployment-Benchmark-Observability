@@ -39,4 +39,4 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/ask" \
 | `POST /ask` với body hợp lệ, thiếu key | 401 |
 | `POST /ask` với body hợp lệ, đúng key | 200 |
 
-[Ảnh endpoint /health](screenshots/running.png) · [Kết quả bốn phép kiểm HTTP](screenshots/test.png)
+[Ảnh Render Events](screenshots/dashboard.png) · [Ảnh endpoint /health](screenshots/running.png) · [Kết quả bốn phép kiểm HTTP](screenshots/test.png)
